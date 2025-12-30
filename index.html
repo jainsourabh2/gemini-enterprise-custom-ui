@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google OAuth 2 & Discovery Engine API Demo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 80%;
+            max-width: 800px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+        }
+
+        h1 {
+            color: #4285F4;
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }
+
+        button {
+            background-color: #4285F4;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #357ae8;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Chat Specific Styles */
+        #agent-selection-section {
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+        }
+
+        select {
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            max-width: 300px;
+        }
+
+        #chat-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            background-color: #fafafa;
+        }
+
+        #chat-history {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 10px 15px;
+            border-radius: 18px;
+            line-height: 1.4;
+            position: relative;
+            word-wrap: break-word;
+        }
+
+        .user-msg {
+            align-self: flex-end;
+            background-color: #4285F4;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .agent-msg {
+            align-self: flex-start;
+            background-color: #e0e0e0;
+            color: #333;
+            border-bottom-left-radius: 4px;
+            text-align: left;
+        }
+
+        .msg-header {
+            font-size: 0.75rem;
+            margin-bottom: 4px;
+            opacity: 0.8;
+        }
+
+        .user-msg .msg-header {
+            text-align: right;
+            color: #e0e0e0;
+        }
+
+        .agent-msg .msg-header {
+            text-align: left;
+            color: #666;
+        }
+
+        #input-area {
+            padding: 1rem;
+            background-color: white;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+        }
+
+        #message-input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+    </style>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>Discovery Engine Chat</h1>
+
+        <div id="auth-section">
+            <p>Authenticate with Google to start.</p>
+            <button id="auth-btn" onclick="initTokenClient()">Sign In with Google</button>
+        </div>
+
+        <div id="app-interface" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
+            <div id="agent-selection-section">
+                <select id="agent-select">
+                    <option value="default">Loading agents...</option>
+                </select>
+                <button id="new-chat-btn" onclick="startNewConversation()">New conversation</button>
+            </div>
+
+            <div id="chat-container" class="hidden">
+                <div id="chat-history">
+                    <!-- Messages will appear here -->
+                </div>
+                <div id="input-area">
+                    <input type="text" id="message-input" placeholder="Type your message..."
+                        onkeypress="handleKeyPress(event)">
+                    <button id="send-btn" onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =================================================================================
+        // PLEASE FILL IN THE FOLLOWING VALUES
+        // =================================================================================
+        const CLIENT_ID = '';
+        const PROJECT_NUMBER = '';
+        const PROJECT_ID = '';
+        const LOCATION = '';
+        const ENGINE = '';
+        // =================================================================================
+
+        const SCOPES = 'https://www.googleapis.com/auth/cloud-platform';
+        const COLLECTION = 'default_collection';
+        const BASE_URL = `https://discoveryengine.googleapis.com/v1alpha/projects/${PROJECT_NUMBER}/locations/${LOCATION}/collections/${COLLECTION}/engines/${ENGINE}`; let tokenClient;
+
+        let accessToken = null;
+        let currentSessionName = null;
+
+        function initTokenClient() {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: (response) => {
+                    if (response.error !== undefined) {
+                        throw (response);
+                    }
+                    accessToken = response.access_token;
+                    document.getElementById('auth-section').classList.add('hidden');
+                    document.getElementById('app-interface').classList.remove('hidden');
+                    listAgents();
+                },
+            });
+            tokenClient.requestAccessToken();
+        }
+
+        async function listAgents() {
+            const select = document.getElementById('agent-select');
+            select.innerHTML = '<option>Loading...</option>';
+
+            try {
+                const response = await fetch(`${BASE_URL}/assistants/default_assistant/agents`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'x-goog-user-project': `${PROJECT_ID}`
+                    }
+                });
+                const data = await response.json();
+
+                select.innerHTML = '';
+
+                // Add default option
+                const defaultOption = document.createElement('option');
+                defaultOption.value = 'RAG search all sources';
+                defaultOption.textContent = 'RAG search all sources';
+                select.appendChild(defaultOption);
+
+                if (data.agents) {
+                    data.agents.forEach(agent => {
+                        const option = document.createElement('option');
+                        option.value = agent.name;
+                        option.textContent = agent.displayName;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error listing agents:', error);
+                select.innerHTML = '<option>Error loading agents</option>';
+            }
+        }
+
+        async function startNewConversation() {
+            const btn = document.getElementById('new-chat-btn');
+            btn.disabled = true;
+            btn.textContent = 'Creating...';
+
+            try {
+                const response = await fetch(`${BASE_URL}/sessions`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'x-goog-user-project': '${PROJECT_ID}',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        displayName: `init-by-api-test-${new Date().toISOString()}`
+                    })
+                });
+
+                const data = await response.json();
+                currentSessionName = data.name;
+
+                document.getElementById('chat-container').classList.remove('hidden');
+                document.getElementById('chat-history').innerHTML = ''; // Clear history
+                addSystemMessage('New conversation started.');
+
+            } catch (error) {
+                console.error('Error creating session:', error);
+                alert('Failed to create session');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'New conversation';
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // Helper function to add messages to the chat history
+        function addMessage(text, sender) {
+            const chatHistory = document.getElementById('chat-history');
+            const messageDiv = document.createElement('div');
+            const msgId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            messageDiv.id = msgId;
+            messageDiv.classList.add('message', `${sender}-msg`);
+
+            const header = document.createElement('div');
+            header.classList.add('msg-header');
+            header.textContent = sender === 'user' ? 'You' : 'Agent';
+            messageDiv.appendChild(header);
+
+            const content = document.createElement('div');
+            content.classList.add('content');
+            content.textContent = text;
+            messageDiv.appendChild(content);
+
+            chatHistory.appendChild(messageDiv);
+            chatHistory.scrollTop = chatHistory.scrollHeight; // Scroll to bottom
+            return msgId;
+        }
+
+        function addSystemMessage(text) {
+            const chatHistory = document.getElementById('chat-history');
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            messageDiv.style.textAlign = 'center';
+            messageDiv.style.fontSize = '0.85rem';
+            messageDiv.style.color = '#666';
+            messageDiv.style.backgroundColor = 'transparent';
+            messageDiv.style.maxWidth = '100%';
+            messageDiv.textContent = text;
+            chatHistory.appendChild(messageDiv);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('message-input');
+            const text = input.value.trim();
+            if (!text || !currentSessionName) return;
+
+            const selectedAgent = document.getElementById('agent-select').value;
+
+            // Add user message
+            addMessage(text, 'user');
+            input.value = '';
+            input.disabled = true;
+            document.getElementById('send-btn').disabled = true;
+
+            // Prepare request body
+            const body = {
+                query: { text: text },
+                answerGenerationMode: "NORMAL",
+                languageCode: "FR",
+                session: currentSessionName
+            };
+
+            if (selectedAgent !== 'RAG search all sources') {
+                body.agentsSpec = {
+                    agentSpecs: [{ agentId: selectedAgent }]
+                };
+            }
+
+            // Create agent message placeholder
+            const agentMsgId = addMessage('Thinking...', 'agent');
+            const agentMsgContent = document.getElementById(agentMsgId).querySelector('.content');
+            let fullResponseText = '';
+
+            try {
+                const response = await fetch(`${BASE_URL}/assistants/default_assistant:streamAssist`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'x-goog-user-project': '${PROJECT_ID}',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API error: ${response.status} - ${errorData.error?.message || JSON.stringify(errorData)}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Process buffer to extract complete JSON objects
+                    let startIndex = 0;
+                    while (true) {
+                        const openBrace = buffer.indexOf('{', startIndex);
+                        if (openBrace === -1) break;
+
+                        let braceCount = 0;
+                        let endIndex = -1;
+                        for (let i = openBrace; i < buffer.length; i++) {
+                            if (buffer[i] === '{') {
+                                braceCount++;
+                            } else if (buffer[i] === '}') {
+                                braceCount--;
+                            }
+                            if (braceCount === 0) {
+                                endIndex = i;
+                                break;
+                            }
+                        }
+
+                        if (endIndex !== -1) {
+                            const jsonStr = buffer.substring(openBrace, endIndex + 1);
+                            try {
+                                const json = JSON.parse(jsonStr);
+                                if (json.answer?.replies) {
+                                    json.answer.replies.forEach(reply => {
+                                        if (reply.groundedContent?.content?.text && !reply.groundedContent.content.thought) {
+                                            fullResponseText += reply.groundedContent.content.text;
+                                            agentMsgContent.innerHTML = marked.parse(fullResponseText, { breaks: true });
+                                            document.getElementById('chat-history').scrollTop = document.getElementById('chat-history').scrollHeight;
+                                        }
+                                    });
+                                }
+                                startIndex = endIndex + 1;
+                            } catch (e) {
+                                // Not a complete JSON object yet, or malformed.
+                                startIndex = openBrace + 1;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    buffer = buffer.substring(startIndex);
+                }
+
+                if (fullResponseText === '') {
+                    agentMsgContent.textContent = 'No response received from agent.';
+                }
+
+            } catch (error) {
+                console.error('Streaming error:', error);
+                agentMsgContent.textContent = `Error: ${error.message}`;
+            } finally {
+                input.disabled = false;
+                document.getElementById('send-btn').disabled = false;
+                input.focus();
+            }
+        }
+    </script>
+</body>
+
+</html>
